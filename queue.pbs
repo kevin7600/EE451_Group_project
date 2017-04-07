@@ -1,0 +1,26 @@
+#!/bin/sh
+# I am a shell script
+# Run on 1 nodes with at least 8 processors each
+#PBS -l nodes=1:ppn=8:gpu
+
+# Run for 5 minutes
+#PBS -l walltime=0:08:00
+
+# Send all output sent to standard out to a file 
+#PBS -o cudajob.output
+
+# Send all output sent to standard error to a file
+#PBS -e cudajob.error
+
+# My job is called CUDAtest
+#PBS -N CUDAtest
+
+# Before starting the job. Change into this directory
+# this has the executable and output files will be created relative to this directory
+#PBS -d /home/your_working_directory
+
+# setup the environment for running a program compiled using openmpi
+source /usr/usc/cuda/5.5/setup.sh
+
+./go
+
