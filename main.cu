@@ -27,7 +27,6 @@ double a_temp[h * w]; 		// temporary array, used to store numerical values
 	1. Perform Fourier transform on the image, at a pixel-by-pixel basis
 	2. Low-pass filter, averaging the current element based on neighboring elements
 	3. Inverse Fourier transform, going back to the "original" image
-
 	
 */
 
@@ -51,9 +50,27 @@ __global__ void fourier_transform(double *in, double *out) {
 	}
 }
 
-// second kernel, which performs the low-pass filter 
-
 // third kernel, which does the inverse Fourier transform
+// as this only involves real numbers, it's basically an averaged Fourier transform
+__global__ void inverse_transform(double *in, double *out) {
+	// block elements
+	int my_x, k, t;
+	my_x = blockIdx.x * blockDim.x + threadIdx.x;
+
+	// iterate through each element, going from frequency to time domain
+	for (k = 0; k < h; k++) {
+		// difference, which will be used to subtract off
+		double realSum = 0;
+		// iterate through the input element
+		for (t = 0; t < h; t++) {
+			double angle = 2 * M_PI * (my_x * 1024 + t) * (my_x * 1024 + k) / 1024;
+			realSum += in[my_x * 1024 + t] * cos(angle);
+		}
+		out[my_x * 1024 + k] = (realSum / 1024);
+	}
+}
+
+// second kernel, which performs the low-pass filter 
 
 // the format for the executable will be the following:
 // (./executable) (file_name) (number_of_threads)
@@ -119,6 +136,10 @@ int main(int argc, char **argv) {
 	// second step: going into the low-pass filter process
 	// this will require having to send data from device to device
 
+	// final step: performing the inverse Fourier transform
+	inverse_transform<<<dimGrid, dimBlock>>> (gpu_b, gpu_a);
+	cudaMemcpy(gpu_a, a_temp, sizeof(double) * h * w, cudaMemcpyDeviceToHost);
+
 	// measure the end time here
 	if (clock_gettime(CLOCK_REALTIME, &stop) == -1) {
 		perror("Clock gettime");
@@ -139,7 +160,7 @@ int main(int argc, char **argv) {
 	// copying temporary b values onto the final b array
 	for (i = 0; i < h; i++) {
 		for (j = 0; j < w; j++) {
-			b[i * h + j] = (unsigned char) b_temp[i * h + j];
+			b[i * h + j] = (unsigned char) a_temp[i * h + j];
 		}
 	}
 
@@ -151,7 +172,7 @@ int main(int argc, char **argv) {
 
 	// free up all memory used
 	free(a); free(b);
-	free(a_temp); free(b_temp);
-	cudaFree(gpu_a); cudaFree(gpu_b);
+	free(a_temp); free(b_temp); 
+	cudaFree(gpu_a); cudaFree(gpu_b); 
 	return 0;
 }
