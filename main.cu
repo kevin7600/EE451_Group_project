@@ -14,7 +14,7 @@
 using namespace std;
 
 // standard, defined variables
-#define output_file "output_image.png"	// output image file
+#define output_file "output_image.raw"	// output image file
 
 // CUDA kernel, which performs Fourier transform on the image
 // while this code loops in n^2 time, CUDA parallelism should make the program faster
