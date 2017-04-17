@@ -14,7 +14,7 @@
 using namespace std;
 
 // standard, defined variables
-#define output_file "output_image.raw"	// output image file
+#define output_file "output_image.raw"	// output image file (bitmap)
 
 // CUDA kernel, which performs Fourier transform on the image
 // while this code loops in n^2 time, CUDA parallelism should make the program faster
@@ -198,19 +198,19 @@ int main(int argc, char **argv) {
 	// updates image array height and width, based on image mode selected
 	// for now, square images will be tested
 	// initiate 512x512 image
-	if (atoi(argv[0]) == 0) {
+	if (atoi(argv[3]) == 0) {
 		height = 512;
 		width = 512;
 	}
 
 	// initiate 1024x1024 image
-	else if (atoi(argv[0]) == 1) {
+	else if (atoi(argv[3]) == 1) {
 		height = 1024;
 		width = 1024;
 	}
 
 	// initiate 2048x2048 image
-	else if (atoi(argv[0]) == 2) {
+	else if (atoi(argv[3]) == 2) {
 		height = 2048;
 		width = 2048;
 	}
