@@ -9,8 +9,6 @@
 #include <cmath>
 #include <cublas.h>
 
-// for now
-
 using namespace std;
 
 // standard, defined variables
@@ -39,114 +37,359 @@ __global__ void fourier_transform(float *in, float *out, int height, int width, 
 	}
 }
 
-// another function, which is responsible for performing 2D convolution on the image
-// to continue with the process, the image should be in the frequency domain
-void image_convolution(float *input, float *output, int height, int width, int kern_size) {
-	// first step will be mapping the image array
-	// this involves mapping from a 1D linear array to a 2D mesh array
-	int x, y, i, j;		// index variables
+// slow convolution function, which doesn't include any optimization
+// this is essentially a general convolution technique, which performs in 0(n^2)
+void convolution_slow(float *input, float *output, int height, int width, float *kernel, int kern_size) {
+	int i, j, m, n, mm, nn;
+	int kCenterX, kCenterY;
+	float sum;
+	int rowIndex, colIndex;
 
-	// temporary float and kernel array, used to store the 2D mesh version
-	float **temp_array;
-	float **temp_kernel;
-	temp_array = (float**) malloc(sizeof(float*) * width);
-	temp_kernel = (float**) malloc(sizeof(float*) * kern_size);
+	// find center position of the kernel
+	kCenterX = kern_size / 2;
+	kCenterY = kern_size / 2;
 
-	// mapping out 2D float array
-	for (x = 0; x < height; x++) {
-		temp_array[x] = (float*) malloc(sizeof(float) * height);
-	}
+	// loop through all the rows
+	for (i = 0; i < height; ++i) {
+		// loop through all the columns
+		for (j = 0; j < width; ++j) {
+			sum = 0;
+			// loop through kernel rows
+			for (m = 0; m < kern_size; ++m) {
+				mm = kern_size - 1 - m;
+				// loop through kernel columns
+				for (n = 0; n < kern_size; ++n) {
+					nn = kern_size - 1 - n;
 
-	// mapping out 2D kernel array
-	for (x = 0; x < kern_size; x++) {
-		temp_kernel[x] = (float*) malloc(sizeof(float) * kern_size);
-	}
+					rowIndex = i + m - kCenterY;
+					colIndex = j + n - kCenterX;
 
-	// mapping from 1D to 2D
-	for (x = 0; x < height; x++) {
-		for (y = 0; y < width; y++) {
-			temp_array[x][y] = input[x * height + y];
+					// ignore input samples which are out of bound
+                    if ((rowIndex >= 0) && (rowIndex < height) && (colIndex >= 0) && (colIndex < width)) {
+                        sum += input[width * rowIndex + colIndex] * kernel[height * mm + nn];
+                    }
+				}
+			}
+			output[width * i + j] = (float) fabs(sum) + 0.5f;
 		}
 	}
+}
 
-	// filling up the kernel mask with values, where the sum of all elements equals to 1
-	for (x = 0; x < kern_size; x++) {
-		for (y = 0; y < kern_size; y++) {
-			temp_kernel[x][y] = 1 / (kern_size * kern_size);
+// an optimized version of 2D convolution
+// for the most case, this assumes the kernel is center originated
+// examples includes kernel sizes of 3x3, 5x5, 7x7, etc.
+void convolution_2D(float *input, float *output, int height, int width, float *kernel, int kern_size) {
+	int i, j, m ,n;
+	float *input_point1, *input_point2, *out_point, *kPtr;
+	int kCenterX, kCenterY;
+	int row_min, row_max;		// check input array boundaries
+	int col_min, col_max;		// same as the two ints above
+
+	// find the center position of the kernel
+	// this will be half of the original kernel size
+	kCenterX = kern_size >> 1;
+	kCenterY = kern_size >> 1;
+
+	// initialize working pointers
+	input_point1 = input_point2 = &input[height * kCenterY + kCenterX];	 	// note shifted element
+	out_point = output;
+	kPtr = kernel;
+
+	// begin the convolution procedure
+	for (i = 0; i < height; ++i) {
+		// compute convolution range, where the current row should be in between
+		row_max = i + kCenterY;
+		row_min = i - height + kCenterY;
+
+		for (j = 0; j < width; ++j) {
+			// compute convolution range, where the current column is in between
+			col_max = j + kCenterX;
+			col_min = j - width + kCenterX;
+
+			*out_point = 0;		// set output pointer to 0 before summing
+
+			// flip the kernel and then traverse through kernel values
+			// multiply each kernel element along with input data below it
+			for (m = 0; m < kern_size; ++m) {
+				// check for out of bounds values
+				if ((m <= row_max) && (m > row_min)) {
+					for (n = 0; n < kern_size; ++n) {
+						// check kernel boundaries again
+						if ((n <= col_max) && (n > col_min)) {
+							*out_point += *(input_point1 - n) * *kPtr;
+						}
+						++kPtr;		// go to the next kernel
+					}
+				}
+				else {
+					kPtr += kern_size;		// move to next row if out of bounds
+				}
+				input_point1 -= kern_size;
+			}
+
+			// complete finishing touches
+			// pointers can be modified as they go directly to variable addresses
+			kPtr = kernel;						// reset the kernel
+			input_point1 = ++input_point2;		// go to the next input
+			++out_point;						// go to the next output
 		}
 	}
+}
 
-	// offset variable, to determine sizing
-	int kern_offset = kern_size / 2;
+// final convolution method, which will be a fast method
+// this function essentially divides the input into sectors
+// in this case, the input will be partitioned into different parts, so no need to check boundaries in all
 
-	// performing the actual convolution procedure
-	// each element doesn't start at 0, as it won't risk from out of bounds calculations
-	// the true starting point depends on the offset, which is based on the kernel size
-	for (x = kern_offset; x < height - kern_offset; x++) {
-		for (y = kern_offset; y < width - kern_offset; y++) {
-			// initialize accumulated value (unweighted sum) and weighted sum
-			float addValue = 0;
-			float weightedSum = 0;
+// NOTE: this is a limited case, which will work on a special case
+// as there's 9 partitions, this scenario only works for 3x3 kernels
+void convolution_fast(float *input, float *output, int height, int width, float *kernel, int kern_size) {
+	int i, j, m, n, x, y, t;
+	float **in_point, *out_point, *point;
+	int kCenterX, kCenterY;
+	int row_end, col_end;		// end indices for section divider
+	float sum;					// accumulation buffer
+	int k, kSize;
 
-			// the next series of loops will iterate through the mask
-			for (i = -kern_offset; i <= kern_offset; i++) {
-				for (j = -kern_offset; j <= kern_offset; j++) {
-					// updating weighted sum values
-					float posValue = temp_array[x + i][y + j];
-					addValue += posValue * temp_kernel[kern_offset + i][kern_offset + j];
-					weightedSum += temp_kernel[kern_offset + i][kern_offset + j];
+	// determine center position of the kernel
+	kCenterX = kern_size >> 1;
+	kCenterY = kern_size >> 1;
+	kSize = kern_size * kern_size;		// total kernel size
+
+	// allocate multi-cursor memory
+	in_point = new float*[kSize];
+
+	// set initial position of the multi-cursor
+	// the position will be a swap, instead of a kernel
+	point = input + (height * kCenterY + kCenterX);		// first cursor shifted
+	for (m = 0, t = 0; m < kern_size; ++m) {
+		for (n = 0; n < kern_size; ++n, ++t) {
+			in_point[t] = point - n;
+		}
+		point -= width;
+	}
+
+	// initialize working pointers
+	out_point = output;
+
+	row_end = height - kCenterY;		// bottom row partition
+	col_end = width - kCenterX;			// bottom column partition
+
+	// perform convolution on rows from index 0 to (kCenterY - 1)
+	y = kCenterY;
+	for (i = 0; i < kCenterY; ++i) {
+		// first partition
+		x = kCenterX;
+		// this goes on rows from index 0 to (kCenterX - 1)
+		for (j = 0; j < kCenterX; ++j) {
+			sum = 0;
+			t = 0;
+			for (m = 0; m <= y; ++m) {
+				for (n = 0; n <= x; ++n) {
+					sum += *in_point[t] * kernel[t];
+					++t;
+				}
+				t += (kern_size - x - 1);
+			}
+
+			// storing the output
+			*out_point = (float) fabs(sum) + 0.5f;
+			++out_point;
+			++x;
+			for (k = 0; k < kSize; ++k) {
+				// shift cursors to the next
+				++in_point[k];
+			}
+		}
+
+		// second partition
+		for (j = kCenterX; j < col_end; ++j) {
+			sum = 0;
+			t = 0;
+			for (m = 0; m <= y; ++m) {
+				for (n = 0; n < kern_size; ++n) {
+					sum += *in_point[t] * kernel[t];
+					++t;
 				}
 			}
 
-			// updating each element of the larger array
-			temp_array[x][y] = (addValue / weightedSum);
+			// store the output
+			*out_point = (float) fabs(sum) + 0.5f;
+			++out_point;
+			++x;
+			for (k = 0; k < kSize; ++k) {
+				// shift cursors to the next 
+				++in_point[k];
+			}
+		}
+
+		// third partition
+		x = 1;
+		for (j = col_end; j < width; ++j) {
+			sum = 0;
+			t = x;
+			for (m = 0; m <= y; ++m) {
+				for (n = 0; n < kern_size; ++n) {
+					sum += *in_point[t] * kernel[t];
+					++t;
+				}
+				// move on to the next row
+				t += x;
+			}
+
+			// store the output
+			*out_point = (float) fabs(sum) + 0.5f;
+			++out_point;
+			++x;
+			for (k = 0; k < kSize; ++k) {
+				// shift cursors to the next 
+				++in_point[k];
+			}
+		}
+		++y;
+	}
+
+	// convolve rows from kCenterY to (rows - kCenterY - 1)
+	for (i = kCenterY; i < row_end; ++i) {
+		// fourth partition
+		x = kCenterX;
+		for (j = 0; j < kCenterX; ++j) {
+			sum = 0;
+			t = 0;
+			for (m = 0; m < kern_size; ++m) {
+				for (n = 0; n <= x; ++n) {
+					sum += *in_point[t] * kernel[t];
+					++t;
+				}
+				t += (kern_size - x - 1);
+			}
+
+			// store the output
+			*out_point = (float) fabs(sum) + 0.5f;
+			++out_point;
+			++x;
+			for (k = 0; k < kSize; ++k) {
+				// shift cursors to the next 
+				++in_point[k];
+			}
+		}
+
+		// fifth partition
+		for (j = kCenterX; j < col_end; ++j) {
+			sum = 0;
+			t = 0;
+			for (m = 0; m < kern_size; ++m) {
+				for (n = 0; n < kern_size; ++n) {
+					sum += *in_point[t] * kernel[t];
+					// all cursors would be used to convolve
+					// in this case, cursors would move by default
+					++in_point[t];
+					++t;
+				}
+			}
+
+			// store the output
+			*out_point = (float) fabs(sum) + 0.5f;
+			++out_point;
+			++x;
+		}
+
+		// sixth partition
+		x = 1;
+		for (j = col_end; j < width; ++j) {
+			sum = 0;
+			t = x;
+			for (m = 0; m < kern_size; ++m) {
+				for (n = x; n < kern_size; ++n) {
+					sum += *in_point[t] * kernel[t];
+					++t;
+				}
+				t += x;
+			}
+
+			// store the output
+			*out_point = (float) fabs(sum) + 0.5f;
+			++out_point;
+			++x;
+			for (k = 0; k < kSize; ++k) {
+				// shift cursors to the next 
+				++in_point[k];
+			}
 		}
 	}
 
-	// printing out the output array, based on filled values
-	for (x = 0; x < height; x++) {
-		for (y = 0; y < width; y++) {
-			output[x * height + y] = temp_array[x][y];
+	// convolve rows, those not included in the previous partitioning
+	y = 1;
+	for (i = row_end; i < height; ++i) {
+		// seventh partition
+		x = kCenterX;
+		for (j = 0; j < kCenterX; ++j) {
+			sum = 0;
+			t = kern_size * y;
+
+			for (m = y; m < kern_size; ++m) {
+				for (n = 0; n <= x; ++n) {
+					sum += *in_point[t] * kernel[t];
+					++t;
+				}
+				t += (kern_size - x - 1);
+			}
+
+			// store the output
+			*out_point = (float) fabs(sum) + 0.5f;
+			++out_point;
+			++x;
+			for (k = 0; k < kSize; ++k) {
+				// shift cursors to the next 
+				++in_point[k];
+			}
 		}
-	}
 
-	// deallocate 2D kernel array
-	for (x = 0; x < kern_size; x++) {
-		free(temp_kernel[x]);
-	}
+		// eight partition
+		for (j = kCenterX; j < col_end; ++j) {
+			sum = 0;
+			t = kern_size * y;
+			for (m = y; m < kern_size; ++m) {
+				for (n = 0; n < kern_size; ++n) {
+					sum += *in_point[t] * kernel[t];
+					++t;
+				}
+			}
 
-	// deallocating the 2D array, once finished using it
-	for (x = 0; x < height; x++) {
-		free(temp_array[x]);
-	}
+			// store the output
+			*out_point = (float) fabs(sum) + 0.5f;
+			++out_point;
+			++x;
+			for (k = 0; k < kSize; ++k) {
+				// shift cursors to the next 
+				++in_point[k];
+			}
+		}
 
-	free(temp_kernel);
-	free(temp_array);
-}
+		// ninth partition
+		x = 1;
+		for (j = col_end; j < width; ++j) {
+			sum = 0;
+			t = kern_size * y + x;
+			for (m = y; m < kern_size; ++m) {
+				for (n = x; n < kern_size; ++n) {
+					sum += *in_point[t] * kernel[t];
+					++t;
+				}
+				t += x;
+			}
 
-// ------------------- necessary functions for convolution filter -------------------//
-// image reflection function
-// any pixel lying outside of the image would be reflected back to the image
-int reflect(int width, int pixel) {
-	if (pixel < 0) {
-		return -pixel - 1;
-	}
-	if (pixel >= width) {
-		return 2 * width - pixel - 1;
-	}
-	return pixel;
-}
+			// store the output
+			*out_point = (float) fabs(sum) + 0.5f;
+			++out_point;
+			++x;
+			for (k = 0; k < kSize; ++k) {
+				// shift cursors to the next 
+				++in_point[k];
+			}
+		}
 
-// circular indexing function
-// any coordinates that exceeds bounds would be wrapped to the opposite side
-int circular(int width, int pixel) {
-	if (pixel < 0) {
-		return pixel + width;
+		++y;		// starting row index increased
 	}
-	if (pixel >= width) {
-		return pixel - width;
-	}
-	return pixel;
 }
 
 
@@ -223,6 +466,9 @@ int main(int argc, char **argv) {
 	float time;
 
 	// generating dynamic arrays 
+	// generating a dynamic kernel array
+	float *kernel = (float*) malloc(sizeof(float) * atoi(argv[4]) * atoi(argv[4]));
+
 	// these arrays will be allocated in row-major order: a[i, j] = a[i * 1024 + j]
 	unsigned char *a = (unsigned char*) malloc(sizeof(unsigned char) * height * width);	// start array
 	unsigned char *b = (unsigned char*) malloc(sizeof(unsigned char) * height * width);	// end array
@@ -260,6 +506,13 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	// filling the kernel with contents, where the sum of everything is 1
+	for (i = 0; i < atoi(argv[4]); i++) {
+		for (j = 0; j < atoi(argv[4]); j++) {
+			kernel[i * atoi(argv[4]) + j] = 1 / (atoi(argv[4]) * atoi(argv[4]));
+		}
+	}
+
 	// extract an integer value from user input
 	int numThreads = atoi(argv[2]);
 
@@ -282,7 +535,7 @@ int main(int argc, char **argv) {
 
 	// perform a 2D image convolution on the image
 	// keep in mind, the image should be in the frequency domain first
-	image_convolution(b_temp, c_temp, height, width, atoi(argv[4]));
+	convolution_2D(b_temp, c_temp, height, width, kernel, atoi(argv[4]));
 
 	// copy the results of the c_temp array onto its respective GPU array
 	cudaMemcpy(c_temp, gpu_c, sizeof(float) * height * width, cudaMemcpyHostToDevice);
@@ -324,6 +577,7 @@ int main(int argc, char **argv) {
 	// free up all memory used
 	free(a); 
 	free(b);
+	free(kernel);
 	free(a_temp); 
 	free(b_temp); 
 	free(c_temp);
