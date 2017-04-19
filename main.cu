@@ -1,4 +1,4 @@
-// for now, this code assumes images of 1024 x 1024
+// for now, this code assumes images are square (rows = columns)
 // needed libraries for the project
 #include <cstdlib>
 #include <cstdio>
@@ -9,9 +9,10 @@
 #include <cmath>
 #include <cublas.h>
 
+// namespace directive
 using namespace std;
 
-// standard, defined variables
+// defined variables
 #define output_file "output_image.raw"	// output image file (bitmap)
 
 // CUDA kernel, which performs Fourier transform on the image
@@ -433,7 +434,7 @@ int main(int argc, char **argv) {
 	}
 
 	// checks whether a valid image mode is set
-	if ((atoi(argv[3]) > 2) || (atoi(argv[3]) < 0)) {
+	if ((atoi(argv[3]) > 3) || (atoi(argv[3]) < 0)) {
 		printf("Invalid image mode set\n");
 		return 1;
 	}
@@ -456,6 +457,12 @@ int main(int argc, char **argv) {
 	else if (atoi(argv[3]) == 2) {
 		height = 2048;
 		width = 2048;
+	}
+
+	// initiate 625x625 image image
+	else if (atoi(argv[3]) == 3) {
+		height = 625;
+		width = 625;
 	}
 
 	int i, j;	// index variables, which will iterate through loops
@@ -503,6 +510,7 @@ int main(int argc, char **argv) {
 	for (i = 0; i < height; i++) {
 		for (j = 0; j < width; j++) {
 			a_temp[i * height + j] = (float) a[i * height + j];
+			c_temp[i * height + j] = 50.0;
 		}
 	}
 
@@ -531,17 +539,21 @@ int main(int argc, char **argv) {
 	// --------------------- the CUDA processes will go here --------------------------------//
 	// perform a Fourier transform on the resulting images
 	fourier_transform<<<dimGrid, dimBlock>>> (gpu_a, gpu_b, height, width, (height / numThreads));
+
+	// copy Fourier results from gpu_b to b_temp
 	cudaMemcpy(b_temp, gpu_b, sizeof(float) * height * width, cudaMemcpyDeviceToHost);
 
 	// perform a 2D image convolution on the image
 	// keep in mind, the image should be in the frequency domain first
-	convolution_2D(b_temp, c_temp, height, width, kernel, atoi(argv[4]));
+	convolution_slow(b_temp, c_temp, height, width, kernel, atoi(argv[4]));
 
 	// copy the results of the c_temp array onto its respective GPU array
 	cudaMemcpy(c_temp, gpu_c, sizeof(float) * height * width, cudaMemcpyHostToDevice);
 
 	// performing the inverse Fourier transform to obtain the final image
 	inverse_transform<<<dimGrid, dimBlock>>> (gpu_c, gpu_a, height, width);
+
+	// copy the final results from gpu_a to a_temp for final processing
 	cudaMemcpy(gpu_a, a_temp, sizeof(double) * height * width, cudaMemcpyDeviceToHost);
 	//--------------------------------------------------------------------------------------//
 
