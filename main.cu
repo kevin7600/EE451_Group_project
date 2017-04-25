@@ -17,7 +17,7 @@
 using namespace std;
 
 // defined variables
-#define output_file "output_image.raw"	// output image file (bitmap)
+#define output_file "output_image.raw"	// output image file 
 
 // CUDA kernel, which performs Fourier transform on the image
 // while this code loops in n^2 time, CUDA parallelism should make the program faster
@@ -143,9 +143,6 @@ int main(int argc, char **argv) {
 	cudaMalloc((void**) &gpu_a, sizeof(float) * height * width);
 	cudaMalloc((void**) &gpu_b, sizeof(float) * height * width);
 	cudaMalloc((void**) &gpu_c, sizeof(float) * height * width);
-
-	// print statement, ensuring all the memory has been allocated
-	printf("Dynamic memory allocation complete\n");
 
 	// check whether the file can be opened or not
 	// basically, it checks if the file is in the current directory
