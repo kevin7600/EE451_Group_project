@@ -339,6 +339,64 @@ int main(int argc, char **argv) {
 		free(temp_array);
 	}
 
+	// go with the median filter
+	// note the mixing between C & C++ syntax, sorry
+	else if (atoi(argv[5]) == 2) {
+		// allocate memory for extension
+		double* extension = new double[(height + 2) * (width * 2)];
+
+		// create the image extension
+		int i;
+		for (i = 0; i < width; ++i) {
+			memcpy(extension + (height + 2) * (i + 1) + 1, b_temp + height * i, height * sizeof(double));
+			extension[(height + 2) * (i + 1)] = b_temp[height * i];
+			extension[(height + 2) * (i + 2) - 1] = b_temp[height * (i + 1) - 1];
+		}
+
+		// fill the first line of the extension
+		memcpy(extension, extension + height + 2, (height + 2) * sizeof(double));
+
+		// fill the last line of the extension
+		memcpy(extension + (height + 2) * (width + 1), extension + (height + 2) * width, (height + 2) * sizeof(double));
+
+		// call the median filter implementation
+		int m, n, j, l;
+
+		// move window through elements of the image
+		for (m = 1; m < width - 1; ++m) {
+			for (n = 1; n < height - 1; ++n) {
+				// pick window elements
+				int k = 0;
+				double window[9];
+				for (j = m - 1; j < m + 2; ++j) {
+					for (l = n - 1; l < n + 2; ++l) {
+						window[k++] = b_temp[j * height + l];
+					}
+				}
+				// order the elements: only half
+				for (j = 0; j < 5; ++j) {
+					// find the position of the minimum element
+					int min = j;
+					for (l = j + 1; l < 9; ++l) {
+						if (window[l] < window[min]) {
+							min = l;
+						}
+					}
+					// place found minimum in its place
+					double temp = window[j];
+					window[j] = window[min];
+					window[min] = temp;
+				}
+
+				// grab middle result
+				c_temp[(m - 1) * (height - 2) + n - 1] = window[4];
+			}
+		}
+
+		// free up memory
+		delete[] extension;
+	}
+
 	// else, invalid convolution mode
 	else {
 		printf("Invalid convolution mode\n");
