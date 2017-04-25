@@ -4,7 +4,7 @@
 #PBS -l nodes=1:ppn=8:gpu
 
 # Run for 5 minutes
-#PBS -l walltime=0:08:00
+#PBS -l walltime=3:60:00
 
 # Send all output sent to standard out to a file 
 #PBS -o cudajob.output
@@ -17,10 +17,10 @@
 
 # Before starting the job. Change into this directory
 # this has the executable and output files will be created relative to this directory
-#PBS -d /home/your_working_directory
+#PBS -d /home/rcf-40/tankevin/EE451_Group_project-master
 
 # setup the environment for running a program compiled using openmpi
 source /usr/usc/cuda/5.5/setup.sh
 
-./go
+./go spatialnoise_ship.raw 1
 
