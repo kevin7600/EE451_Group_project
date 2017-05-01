@@ -1,14 +1,16 @@
 "#EE451_Group_project" 
 
-Reserve some nodes:
-	qsub -I -d. -l nodes=1:ppn=16:gpu,walltime=00:30:00
+Do this:
+	source /usr/usc/cuda/5.5/setup.sh
+
 Compile code:
-	gcc -lrt -fopenmp -o run filter.c
+	nvcc -o go filter.cu
+
+format queue.pbs:
+	dos2unix queue.pbs
+	
 Run program:
- ./run
- ./run "image.raw" "width" "height" "Window Mode" "Filter Type" "Number of threads" 
- e.g. ./run raw/dog.raw 591 401 0 0 4
-	  ./run raw/Pepper.raw 512 512 2 2 8
+	qsub queue.pbs
  
  
  *can get the width and height of a raw image from the respective pic in pics folder
